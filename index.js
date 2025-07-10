@@ -75,7 +75,7 @@ client.on('interactionCreate', async interaction => {
 
 // Función para buscar video en YouTube
 async function searchLineupVideo(agent, map, side) {
-  const cacheKey = `${agent}-${map}-${side}`;
+  const cacheKey = `${agent}-${map}-${side}-video`;
   if (cache.has(cacheKey)) {
     console.log(`Usando caché para ${cacheKey}`);
     return cache.get(cacheKey);
@@ -107,18 +107,30 @@ async function searchLineupVideo(agent, map, side) {
   }
 }
 
-// Función para obtener un GIF del video (experimental, opcional)
-async function getVideoGif(videoUrl) {
+// Función para buscar GIF en GIPHY
+async function searchLineupGif(agent, map, side) {
+  const cacheKey = `${agent}-${map}-${side}-gif`;
+  if (cache.has(cacheKey)) {
+    console.log(`Usando caché para ${cacheKey}`);
+    return cache.get(cacheKey);
+  }
+
   try {
-    const apiKey = process.env.EZGIF_API_KEY; // Necesitas una clave de API de ezgif.com o similar
+    const apiKey = process.env.GIPHY_API_KEY;
     if (!apiKey) return null;
+    const query = `${agent} ${map} Valorant lineup`;
     const response = await fetch(
-      `https://ezgif.com/youtube-to-gif?url=${encodeURIComponent(videoUrl)}&api_key=${apiKey}&start=5&duration=5`
+      `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=1&rating=pg`
     );
     const data = await response.json();
-    return data.gif_url || null; // Ajusta según la API real
+    const gif = data.data[0];
+    if (!gif) return null;
+
+    const result = gif.images.original.url;
+    cache.set(cacheKey, result);
+    return result;
   } catch (error) {
-    console.error('Error al obtener GIF:', error);
+    console.error('Error al buscar GIF en GIPHY:', error);
     return null;
   }
 }
@@ -154,10 +166,10 @@ client.on('interactionCreate', async interaction => {
       const videoUrl = await searchLineupVideo(agent, map, side);
 
       if (videoUrl) {
-        // Intentar obtener GIF (opcional)
-        const gifUrl = process.env.EZGIF_API_KEY ? await getVideoGif(videoUrl) : null;
+        // Buscar GIF (opcional)
+        const gifUrl = process.env.GIPHY_API_KEY ? await searchLineupGif(agent, map, side) : null;
         if (gifUrl) {
-          await interaction.editReply(`${videoUrl}\n${gifUrl}`);
+          await interaction.editReply(`${gifUrl}\n${videoUrl}`);
         } else {
           await interaction.editReply(videoUrl);
         }
