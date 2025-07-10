@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 require('dotenv').config();
 
@@ -22,7 +22,7 @@ const client = new Client({
 client.once('ready', async () => {
   console.log(`Bot listo como ${client.user.tag}!`);
 
-  // Definir comando de barra
+  // Definir comando de barra con autocompletado
   const command = new SlashCommandBuilder()
     .setName('lineup')
     .setDescription('Obtiene un video de YouTube con un lineup de Valorant')
@@ -31,6 +31,7 @@ client.once('ready', async () => {
         .setName('agent')
         .setDescription('Nombre del agente (ejemplo: Sova)')
         .setRequired(true)
+        .setAutocomplete(true)
     )
     .addStringOption(option =>
       option
@@ -55,6 +56,22 @@ client.once('ready', async () => {
   }
 });
 
+// Manejar autocompletado para agentes
+client.on('interactionCreate', async interaction => {
+  if (interaction.isAutocomplete()) {
+    const focusedOption = interaction.options.getFocused(true);
+    if (focusedOption.name === 'agent') {
+      const input = focusedOption.value.toLowerCase();
+      const filteredAgents = validAgents
+        .filter(agent => agent.toLowerCase().includes(input))
+        .slice(0, 25); // Límite de 25 opciones para autocompletado
+      await interaction.respond(
+        filteredAgents.map(agent => ({ name: agent, value: agent }))
+      );
+    }
+  }
+});
+
 // Función para buscar videos en YouTube
 async function searchLineupVideo(agent, map, side) {
   const cacheKey = `${agent}-${map}-${side}`;
@@ -69,7 +86,7 @@ async function searchLineupVideo(agent, map, side) {
       auth: process.env.YOUTUBE_API_KEY,
     });
 
-    const query = `${agent} ${map} ${side} Valorant lineup`;
+    const query = `${agent} ${map} ${side} Valorant lineup guide`;
     const response = await youtube.search.list({
       part: 'snippet',
       q: query,
@@ -83,7 +100,7 @@ async function searchLineupVideo(agent, map, side) {
     const result = {
       title: video.snippet.title,
       videoUrl: `https://www.youtube.com/watch?v=${video.id.videoId}`,
-      thumbnail: video.snippet.thumbnails.high.url,
+      thumbnail: video.snippet.thumbnails.high.url || video.snippet.thumbnails.default.url,
       description: video.snippet.description,
     };
 
@@ -126,16 +143,24 @@ client.on('interactionCreate', async interaction => {
       const video = await searchLineupVideo(agent, map, side);
 
       if (video) {
+        // Crear embed con thumbnail y botón
         const embed = new EmbedBuilder()
           .setTitle(`Lineup para ${agent} en ${map} (${side})`)
           .setDescription(video.description || 'Video de lineup de Valorant')
           .setColor('#FF4655')
-          .setURL(video.videoUrl)
           .setImage(video.thumbnail)
           .setFooter({ text: 'Fuente: YouTube | Bot creado por Kaspercito' })
           .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed] });
+        // Añadir botón para abrir el video
+        const button = new ButtonBuilder()
+          .setLabel('Ver video en YouTube')
+          .setStyle(ButtonStyle.Link)
+          .setURL(video.videoUrl);
+
+        const row = new ActionRowBuilder().addComponents(button);
+
+        await interaction.editReply({ embeds: [embed], components: [row] });
       } else {
         await interaction.editReply({
           content: `❌ No se encontró un video de lineup para ${agent} en ${map} (${side}). Intenta con otros parámetros.`,
