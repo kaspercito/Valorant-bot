@@ -1,0 +1,23 @@
+{
+  "name": "valorant-lineup-bot",
+  "version": "1.0.0",
+  "description": "Un bot de Discord que envía imágenes de lineups de Valorant desde Tracker.gg",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kaspercito/Valorant-bot"
+  },
+  "author": "TU_NOMBRE",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "puppeteer": "^23.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
