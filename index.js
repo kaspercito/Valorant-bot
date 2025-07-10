@@ -1,5 +1,6 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder } = require('discord.js');
 const { google } = require('googleapis');
+const fetch = require('node-fetch');
 require('dotenv').config();
 
 // Lista de agentes, mapas y lados válidos (actualizada para julio 2025)
@@ -25,7 +26,7 @@ client.once('ready', async () => {
   // Definir comando de barra con autocompletado
   const command = new SlashCommandBuilder()
     .setName('lineup')
-    .setDescription('Obtiene un video de YouTube con un lineup de Valorant')
+    .setDescription('Envía un enlace a un video de YouTube con un lineup de Valorant')
     .addStringOption(option =>
       option
         .setName('agent')
@@ -72,7 +73,7 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Función para buscar videos en YouTube
+// Función para buscar video en YouTube
 async function searchLineupVideo(agent, map, side) {
   const cacheKey = `${agent}-${map}-${side}`;
   if (cache.has(cacheKey)) {
@@ -86,7 +87,7 @@ async function searchLineupVideo(agent, map, side) {
       auth: process.env.YOUTUBE_API_KEY,
     });
 
-    const query = `${agent} ${map} ${side} Valorant lineup guide`;
+    const query = `${agent} ${map} ${side} Valorant lineup guide short`;
     const response = await youtube.search.list({
       part: 'snippet',
       q: query,
@@ -97,17 +98,27 @@ async function searchLineupVideo(agent, map, side) {
     const video = response.data.items[0];
     if (!video) return null;
 
-    const result = {
-      title: video.snippet.title,
-      videoUrl: `https://www.youtube.com/watch?v=${video.id.videoId}`,
-      thumbnail: video.snippet.thumbnails.high.url || video.snippet.thumbnails.default.url,
-      description: video.snippet.description,
-    };
-
+    const result = `https://www.youtube.com/watch?v=${video.id.videoId}`;
     cache.set(cacheKey, result);
     return result;
   } catch (error) {
     console.error('Error al buscar video en YouTube:', error);
+    return null;
+  }
+}
+
+// Función para obtener un GIF del video (experimental, opcional)
+async function getVideoGif(videoUrl) {
+  try {
+    const apiKey = process.env.EZGIF_API_KEY; // Necesitas una clave de API de ezgif.com o similar
+    if (!apiKey) return null;
+    const response = await fetch(
+      `https://ezgif.com/youtube-to-gif?url=${encodeURIComponent(videoUrl)}&api_key=${apiKey}&start=5&duration=5`
+    );
+    const data = await response.json();
+    return data.gif_url || null; // Ajusta según la API real
+  } catch (error) {
+    console.error('Error al obtener GIF:', error);
     return null;
   }
 }
@@ -140,27 +151,16 @@ client.on('interactionCreate', async interaction => {
       }
 
       // Buscar video
-      const video = await searchLineupVideo(agent, map, side);
+      const videoUrl = await searchLineupVideo(agent, map, side);
 
-      if (video) {
-        // Crear embed con thumbnail y botón
-        const embed = new EmbedBuilder()
-          .setTitle(`Lineup para ${agent} en ${map} (${side})`)
-          .setDescription(video.description || 'Video de lineup de Valorant')
-          .setColor('#FF4655')
-          .setImage(video.thumbnail)
-          .setFooter({ text: 'Fuente: YouTube | Bot creado por Kaspercito' })
-          .setTimestamp();
-
-        // Añadir botón para abrir el video
-        const button = new ButtonBuilder()
-          .setLabel('Ver video en YouTube')
-          .setStyle(ButtonStyle.Link)
-          .setURL(video.videoUrl);
-
-        const row = new ActionRowBuilder().addComponents(button);
-
-        await interaction.editReply({ embeds: [embed], components: [row] });
+      if (videoUrl) {
+        // Intentar obtener GIF (opcional)
+        const gifUrl = process.env.EZGIF_API_KEY ? await getVideoGif(videoUrl) : null;
+        if (gifUrl) {
+          await interaction.editReply(`${videoUrl}\n${gifUrl}`);
+        } else {
+          await interaction.editReply(videoUrl);
+        }
       } else {
         await interaction.editReply({
           content: `❌ No se encontró un video de lineup para ${agent} en ${map} (${side}). Intenta con otros parámetros.`,
