@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const puppeteer = require('puppeteer');
+const { google } = require('googleapis');
+require('dotenv').config();
 
 // Lista de agentes, mapas y lados válidos (actualizada para julio 2025)
 const validAgents = [
@@ -11,6 +12,9 @@ const validAgents = [
 const validMaps = ['Ascent', 'Haven', 'Icebox', 'Lotus', 'Bind', 'Sunset', 'Corrode'];
 const validSides = ['Attack', 'Defense'];
 
+// Cache para almacenar resultados de búsqueda
+const cache = new Map();
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
@@ -21,7 +25,7 @@ client.once('ready', async () => {
   // Definir comando de barra
   const command = new SlashCommandBuilder()
     .setName('lineup')
-    .setDescription('Obtiene un lineup de Valorant con imagen')
+    .setDescription('Obtiene un video de YouTube con un lineup de Valorant')
     .addStringOption(option =>
       option
         .setName('agent')
@@ -51,33 +55,42 @@ client.once('ready', async () => {
   }
 });
 
-// Función para scrapear lineups de Tracker.gg
-async function scrapeLineup(agent, map, side) {
-  try {
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-    const page = await browser.newPage();
-    const url = 'https://tracker.gg/valorant/guides';
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+// Función para buscar videos en YouTube
+async function searchLineupVideo(agent, map, side) {
+  const cacheKey = `${agent}-${map}-${side}`;
+  if (cache.has(cacheKey)) {
+    console.log(`Usando caché para ${cacheKey}`);
+    return cache.get(cacheKey);
+  }
 
-    const lineups = await page.evaluate(() => {
-      const items = Array.from(document.querySelectorAll('.guide-card')); // Ajusta según el HTML de Tracker.gg
-      return items.map(item => ({
-        title: item.querySelector('.guide-title')?.textContent.trim() || 'Sin título',
-        videoUrl: item.querySelector('a[href*="video"]')?.href || '',
-        imageUrl: item.querySelector('img')?.src || ''
-      }));
+  try {
+    const youtube = google.youtube({
+      version: 'v3',
+      auth: process.env.YOUTUBE_API_KEY,
     });
 
-    await browser.close();
+    const query = `${agent} ${map} ${side} Valorant lineup`;
+    const response = await youtube.search.list({
+      part: 'snippet',
+      q: query,
+      maxResults: 1,
+      type: 'video',
+    });
 
-    // Filtrar por agente, mapa y lado (case-insensitive)
-    return lineups.find(
-      l => l.title.toLowerCase().includes(agent.toLowerCase()) &&
-           l.title.toLowerCase().includes(map.toLowerCase()) &&
-           l.title.toLowerCase().includes(side.toLowerCase())
-    ) || null;
+    const video = response.data.items[0];
+    if (!video) return null;
+
+    const result = {
+      title: video.snippet.title,
+      videoUrl: `https://www.youtube.com/watch?v=${video.id.videoId}`,
+      thumbnail: video.snippet.thumbnails.high.url,
+      description: video.snippet.description,
+    };
+
+    cache.set(cacheKey, result);
+    return result;
   } catch (error) {
-    console.error('Error al scrapear:', error);
+    console.error('Error al buscar video en YouTube:', error);
     return null;
   }
 }
@@ -87,56 +100,52 @@ client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
 
   if (interaction.commandName === 'lineup') {
-    await interaction.deferReply();
-    const agent = interaction.options.getString('agent');
-    const map = interaction.options.getString('map');
-    const side = interaction.options.getString('side');
+    try {
+      await interaction.deferReply({ ephemeral: false }); // Respuesta en el canal
+      const agent = interaction.options.getString('agent');
+      const map = interaction.options.getString('map');
+      const side = interaction.options.getString('side');
 
-    // Validar entradas
-    if (!validAgents.map(a => a.toLowerCase()).includes(agent.toLowerCase())) {
+      // Validar entradas
+      if (!validAgents.map(a => a.toLowerCase()).includes(agent.toLowerCase())) {
+        await interaction.editReply({
+          content: `❌ Agente inválido. Usa uno de: ${validAgents.join(', ')}.`,
+          ephemeral: true
+        });
+        return;
+      }
+      if (!validMaps.includes(map) || !validSides.includes(side)) {
+        await interaction.editReply({
+          content: '❌ Mapa o lado inválidos. Usa mapas y lados válidos.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // Buscar video
+      const video = await searchLineupVideo(agent, map, side);
+
+      if (video) {
+        const embed = new EmbedBuilder()
+          .setTitle(`Lineup para ${agent} en ${map} (${side})`)
+          .setDescription(video.description || 'Video de lineup de Valorant')
+          .setColor('#FF4655')
+          .setURL(video.videoUrl)
+          .setImage(video.thumbnail)
+          .setFooter({ text: 'Fuente: YouTube | Bot creado por Kaspercito' })
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+      } else {
+        await interaction.editReply({
+          content: `❌ No se encontró un video de lineup para ${agent} en ${map} (${side}). Intenta con otros parámetros.`,
+          ephemeral: true
+        });
+      }
+    } catch (error) {
+      console.error('Error en interacción:', error);
       await interaction.editReply({
-        content: `❌ Agente inválido. Usa uno de: ${validAgents.join(', ')}.`,
-        ephemeral: true
-      });
-      return;
-    }
-    if (!validMaps.includes(map) || !validSides.includes(side)) {
-      await interaction.editReply({
-        content: '❌ Mapa o lado inválidos. Usa mapas y lados válidos.',
-        ephemeral: true
-      });
-      return;
-    }
-
-    // Obtener lineup
-    const lineup = await scrapeLineup(agent, map, side);
-
-    if (lineup && lineup.imageUrl) {
-      // Crear embed con imagen
-      const embed = new EmbedBuilder()
-        .setTitle(`Lineup para ${agent} en ${map} (${side})`)
-        .setDescription(lineup.title || 'Lineup de Valorant')
-        .setColor('#FF4655')
-        .setImage(lineup.imageUrl)
-        .setURL(lineup.videoUrl || null)
-        .setFooter({ text: 'Fuente: Tracker.gg | Bot creado por Kaspercito' })
-        .setTimestamp();
-
-      await interaction.editReply({ embeds: [embed] });
-    } else if (lineup) {
-      // Sin imagen, solo texto
-      const embed = new EmbedBuilder()
-        .setTitle(`Lineup para ${agent} en ${map} (${side})`)
-        .setDescription(lineup.title || 'Lineup de Valorant')
-        .setColor('#FF4655')
-        .setURL(lineup.videoUrl || null)
-        .setFooter({ text: 'Fuente: Tracker.gg | Bot creado por Kaspercito' })
-        .setTimestamp();
-
-      await interaction.editReply({ embeds: [embed] });
-    } else {
-      await interaction.editReply({
-        content: `❌ No se encontró un lineup para ${agent} en ${map} (${side}). Intenta con otros parámetros.`,
+        content: '❌ Error al procesar el comando. Intenta de nuevo más tarde.',
         ephemeral: true
       });
     }
