@@ -18,15 +18,15 @@ const client = new Client({
 client.once('ready', async () => {
   console.log(`Bot listo como ${client.user.tag}!`);
 
+  // Definir comando de barra
   const command = new SlashCommandBuilder()
     .setName('lineup')
     .setDescription('Obtiene un lineup de Valorant con imagen')
     .addStringOption(option =>
       option
         .setName('agent')
-        .setDescription('Nombre del agente')
+        .setDescription('Nombre del agente (ejemplo: Sova)')
         .setRequired(true)
-        .addChoices(...validAgents.map(agent => ({ name: agent, value: agent })))
     )
     .addStringOption(option =>
       option
@@ -51,6 +51,7 @@ client.once('ready', async () => {
   }
 });
 
+// Función para scrapear lineups de Tracker.gg
 async function scrapeLineup(agent, map, side) {
   try {
     const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
@@ -69,6 +70,7 @@ async function scrapeLineup(agent, map, side) {
 
     await browser.close();
 
+    // Filtrar por agente, mapa y lado (case-insensitive)
     return lineups.find(
       l => l.title.toLowerCase().includes(agent.toLowerCase()) &&
            l.title.toLowerCase().includes(map.toLowerCase()) &&
@@ -80,6 +82,7 @@ async function scrapeLineup(agent, map, side) {
   }
 }
 
+// Manejar comandos
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
 
@@ -89,17 +92,27 @@ client.on('interactionCreate', async interaction => {
     const map = interaction.options.getString('map');
     const side = interaction.options.getString('side');
 
-    if (!validAgents.includes(agent) || !validMaps.includes(map) || !validSides.includes(side)) {
+    // Validar entradas
+    if (!validAgents.map(a => a.toLowerCase()).includes(agent.toLowerCase())) {
       await interaction.editReply({
-        content: '❌ Parámetros inválidos. Usa agentes, mapas y lados válidos.',
+        content: `❌ Agente inválido. Usa uno de: ${validAgents.join(', ')}.`,
+        ephemeral: true
+      });
+      return;
+    }
+    if (!validMaps.includes(map) || !validSides.includes(side)) {
+      await interaction.editReply({
+        content: '❌ Mapa o lado inválidos. Usa mapas y lados válidos.',
         ephemeral: true
       });
       return;
     }
 
+    // Obtener lineup
     const lineup = await scrapeLineup(agent, map, side);
 
     if (lineup && lineup.imageUrl) {
+      // Crear embed con imagen
       const embed = new EmbedBuilder()
         .setTitle(`Lineup para ${agent} en ${map} (${side})`)
         .setDescription(lineup.title || 'Lineup de Valorant')
@@ -111,6 +124,7 @@ client.on('interactionCreate', async interaction => {
 
       await interaction.editReply({ embeds: [embed] });
     } else if (lineup) {
+      // Sin imagen, solo texto
       const embed = new EmbedBuilder()
         .setTitle(`Lineup para ${agent} en ${map} (${side})`)
         .setDescription(lineup.title || 'Lineup de Valorant')
