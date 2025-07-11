@@ -1,196 +1,53 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder } = require('discord.js');
-const { google } = require('googleapis');
-const fetch = require('node-fetch');
-require('dotenv').config();
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+require('dotenv').config(); // Para usar variables de entorno (opcional)
 
-// Lista de agentes, mapas y lados válidos (actualizada para julio 2025)
-const validAgents = [
-  'Brimstone', 'Jett', 'Phoenix', 'Sage', 'Sova', 'Viper', 'Cypher', 'Reyna',
-  'Killjoy', 'Breach', 'Omen', 'Raze', 'Skye', 'Yoru', 'Astra', 'KAY/O',
-  'Chamber', 'Neon', 'Fade', 'Harbor', 'Gekko', 'Deadlock', 'Iso', 'Clove',
-  'Vyse', 'Tejo', 'Waylay'
-];
-const validMaps = ['Ascent', 'Haven', 'Icebox', 'Lotus', 'Bind', 'Sunset', 'Corrode'];
-const validSides = ['Attack', 'Defense'];
-
-// Cache para almacenar resultados de búsqueda
-const cache = new Map();
-
+// Configura el cliente de Discord con los intents necesarios
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
+// Cuando el bot esté listo
 client.once('ready', async () => {
-  console.log(`Bot listo como ${client.user.tag}!`);
+  console.log(`Bot conectado como ${client.user.tag}`);
 
-  // Definir comando de barra con autocompletado
-  const command = new SlashCommandBuilder()
-    .setName('lineup')
-    .setDescription('Envía un enlace a un video de YouTube con un lineup de Valorant')
-    .addStringOption(option =>
-      option
-        .setName('agent')
-        .setDescription('Nombre del agente (ejemplo: Sova)')
-        .setRequired(true)
-        .setAutocomplete(true)
-    )
-    .addStringOption(option =>
-      option
-        .setName('map')
-        .setDescription('Nombre del mapa')
-        .setRequired(true)
-        .addChoices(...validMaps.map(map => ({ name: map, value: map })))
-    )
-    .addStringOption(option =>
-      option
-        .setName('side')
-        .setDescription('Lado (Attack/Defense)')
-        .setRequired(true)
-        .addChoices(...validSides.map(side => ({ name: side, value: side })))
-    );
+  // ID del canal donde se enviará el mensaje
+  const channelId = '1343749554905940058';
+  const channel = client.channels.cache.get(channelId);
 
-  try {
-    await client.application.commands.create(command);
-    console.log('Comando /lineup registrado!');
-  } catch (error) {
-    console.error('Error al registrar comando:', error);
-  }
-});
-
-// Manejar autocompletado para agentes
-client.on('interactionCreate', async interaction => {
-  if (interaction.isAutocomplete()) {
-    const focusedOption = interaction.options.getFocused(true);
-    if (focusedOption.name === 'agent') {
-      const input = focusedOption.value.toLowerCase();
-      const filteredAgents = validAgents
-        .filter(agent => agent.toLowerCase().includes(input))
-        .slice(0, 25); // Límite de 25 opciones para autocompletado
-      await interaction.respond(
-        filteredAgents.map(agent => ({ name: agent, value: agent }))
-      );
-    }
-  }
-});
-
-// Función para buscar video en YouTube
-async function searchLineupVideo(agent, map, side) {
-  const cacheKey = `${agent}-${map}-${side}-video`;
-  if (cache.has(cacheKey)) {
-    console.log(`Usando caché para ${cacheKey}`);
-    return cache.get(cacheKey);
+  if (!channel) {
+    console.error('No se encontró el canal con el ID proporcionado.');
+    return;
   }
 
   try {
-    const youtube = google.youtube({
-      version: 'v3',
-      auth: process.env.YOUTUBE_API_KEY,
-    });
+    const embed = new EmbedBuilder()
+      .setTitle('Todo lo que hice por vos')
+      .setDescription(
+        'Quería demostrarte cuánto te quise y todo lo que hice para que estuvieras bien. Creíste que en mí habías encontrado "el hombre que sabría cómo no romperte el corazón", pero parece que nunca viste todo lo que hice por vos. Acá está la prueba de mi esfuerzo y mi amor:\n\n' +
+        '- **Una página que muestra cuánto te quería**: [Corazón animado](https://codepen.io/Kasper-Cito/pen/PoLeypo)\n' +
+        '- **Un diseño para expresar mis sentimientos**: [Diseño romántico](https://codepen.io/Kasper-Cito/pen/PorvQoM)\n' +
+        '- **Un mensaje que salió del alma**: [Mensaje especial](https://codepen.io/Kasper-Cito/pen/OJKRrvZ)\n' +
+        '- **Un espacio para recordarte**: [Otro diseño para vos](https://codepen.io/Kasper-Cito/pen/jOgMRJR)\n' +
+        '- **Una página dedicada a vos**: [Mensaje en GitHub](https://kaspercito.github.io/mensaje/)\n' +
+        '- **Un proyecto entero que hice pensando en vos**: [Oliver-IA](https://github.com/kaspercito/Oliver-IA)\n' +
+        '- **Un video que muestra mi esfuerzo**: [Video en YouTube](https://youtu.be/7vdpIhgxljg)\n\n' +
+        'Todo esto lo hice con el corazón, porque para mí valías todo. Si no lo viste entonces, ojalá lo veas ahora.'
+      )
+      .setColor('#ff4d4d') // Color rojo para un toque emotivo
+      .setFooter({ text: 'Con cariño, desde el fondo de mi corazón.' })
+      .setTimestamp();
 
-    const query = `${agent} ${map} ${side} Valorant lineup guide short`;
-    const response = await youtube.search.list({
-      part: 'snippet',
-      q: query,
-      maxResults: 1,
-      type: 'video',
-    });
-
-    const video = response.data.items[0];
-    if (!video) return null;
-
-    const result = `https://www.youtube.com/watch?v=${video.id.videoId}`;
-    cache.set(cacheKey, result);
-    return result;
+    // Envía el mensaje al canal especificado
+    await channel.send({ embeds: [embed] });
+    console.log(`Mensaje enviado al canal ${channelId}`);
   } catch (error) {
-    console.error('Error al buscar video en YouTube:', error);
-    return null;
-  }
-}
-
-// Función para buscar GIF en GIPHY
-async function searchLineupGif(agent, map, side) {
-  const cacheKey = `${agent}-${map}-${side}-gif`;
-  if (cache.has(cacheKey)) {
-    console.log(`Usando caché para ${cacheKey}`);
-    return cache.get(cacheKey);
-  }
-
-  try {
-    const apiKey = process.env.GIPHY_API_KEY;
-    if (!apiKey) return null;
-    const query = `${agent} ${map} Valorant lineup`;
-    const response = await fetch(
-      `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=1&rating=pg`
-    );
-    const data = await response.json();
-    const gif = data.data[0];
-    if (!gif) return null;
-
-    const result = gif.images.original.url;
-    cache.set(cacheKey, result);
-    return result;
-  } catch (error) {
-    console.error('Error al buscar GIF en GIPHY:', error);
-    return null;
-  }
-}
-
-// Manejar comandos
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isCommand()) return;
-
-  if (interaction.commandName === 'lineup') {
-    try {
-      await interaction.deferReply({ ephemeral: false }); // Respuesta en el canal
-      const agent = interaction.options.getString('agent');
-      const map = interaction.options.getString('map');
-      const side = interaction.options.getString('side');
-
-      // Validar entradas
-      if (!validAgents.map(a => a.toLowerCase()).includes(agent.toLowerCase())) {
-        await interaction.editReply({
-          content: `❌ Agente inválido. Usa uno de: ${validAgents.join(', ')}.`,
-          ephemeral: true
-        });
-        return;
-      }
-      if (!validMaps.includes(map) || !validSides.includes(side)) {
-        await interaction.editReply({
-          content: '❌ Mapa o lado inválidos. Usa mapas y lados válidos.',
-          ephemeral: true
-        });
-        return;
-      }
-
-      // Buscar video
-      const videoUrl = await searchLineupVideo(agent, map, side);
-
-      if (videoUrl) {
-        // Buscar GIF (opcional)
-        const gifUrl = process.env.GIPHY_API_KEY ? await searchLineupGif(agent, map, side) : null;
-        if (gifUrl) {
-          await interaction.editReply(`${gifUrl}\n${videoUrl}`);
-        } else {
-          await interaction.editReply(videoUrl);
-        }
-      } else {
-        await interaction.editReply({
-          content: `❌ No se encontró un video de lineup para ${agent} en ${map} (${side}). Intenta con otros parámetros.`,
-          ephemeral: true
-        });
-      }
-    } catch (error) {
-      console.error('Error en interacción:', error);
-      await interaction.editReply({
-        content: '❌ Error al procesar el comando. Intenta de nuevo más tarde.',
-        ephemeral: true
-      });
-    }
+    console.error('Error al enviar el mensaje:', error);
   }
 });
 
-client.on('error', error => {
-  console.error('Error del cliente:', error);
-});
-
-client.login(process.env.DISCORD_TOKEN);
+// Inicia el bot con tu token
+client.login(process.env.DISCORD_TOKEN || 'TU_TOKEN_AQUÍ'); // Usa .env o reemplaza con tu token
